@@ -1,0 +1,87 @@
+{
+    "name": "Kimai2",
+    "id": "kimai2",
+    "packaging_format": 1,
+    "description": {
+        "en": "Kimai v2 is web based Timetracker: multi-user application for time-tracking with support for mobile devices",
+        "fr": "Kimai v2 est une application web de suivi du temps, multi-utilisateurs, et compatible avec les appareils mobiles",
+        "de": "Kimai v2 ist eine web-basierte Mehrbenutzer-Zeiterfassung mit Rechnungsdruck mit Unterstützung für mobile Endgeräte",
+        "cs": "Kimai v2 je víceuživatelská webová aplikace pro sledování času s podporou mobilních zařízení"
+    },
+    "version": "0.8.1",
+    "url": "https://v2.kimai.org",
+    "license": "MIT",
+    "maintainer": {
+        "name": "Anmol Sharma",
+        "email": "anmol@datamol.org",
+        "url": "datamol.org"
+    },
+    "requirements": {
+        "yunohost": ">= 2.7.2"
+    },
+    "multi_instance": true,
+    "services": [
+        "nginx",
+        "php7.2-fpm",
+        "mysql"
+    ],
+    "arguments": {
+        "install" : [
+            {
+                "name": "domain",
+                "type": "domain",
+                "ask": {
+                    "en": "Choose a domain name for Kimai2",
+                    "fr": "Choisissez un nom de domaine pour Kimai2",
+                    "de": "Wählen Sie einen Domainnamen für Kimai 2",
+                    "cs": "Zvolte doménu pro Kimai 2"
+                },
+                "example": "kimai2.example.com"
+            },
+            {
+                "name": "admin",
+                "type": "user",
+                "ask": {
+                    "en": "Choose an admin user (should be a YunoHost registered user).",
+                    "fr": "Choisissez l’administrateur (should be a YunoHost registered user).",
+                    "de": "Wählen Sie einen Admin Benutzer (sollte ein registrierter YunoHost Benutzer sein).",
+                    "cs": "Zvolte administrátora (musí to být registrovaný uživatel YunoHostu)."
+                },
+                "example": "johndoe"
+            },
+            {
+                "name": "database",
+                "ask": {
+                    "en": "Choose the database to use (for production usage choose: mysql)",
+                    "fr": "Choisissez le type de base de données à utiliser (mysql pour un usage en production)",
+                    "de": "Wählen Sie die zu nutzende Datenbank (für produktive Zwecke wähle: mysql)",
+                    "cs": "Zvolte databázi (pro produkční použití vyberte: mysql)"
+                },
+                "choices": ["mysql","sqlite"],
+                "default": "mysql"
+			},
+             {
+                "name": "registration",
+                "type": "boolean",
+                "ask": {
+                    "en": "Are new users allowed to register ?",
+                    "fr": "Est-ce que de nouveaux utilisateurs peuvent s'y inscrire ?",
+                    "de": "Sollen sich neue Benutzer selber registrieren können ?",
+                    "cs": "Mohou se noví uživatelé registrovat?"
+                },
+                "default": false
+            },
+            {
+                "name": "is_public",
+                "type": "boolean",
+                "ask": {
+                    "en": "Is it a public application?",
+                    "fr": "Est-ce une application publique ?",
+                    "de": "Ist dies eine öffentliche Applikation?",
+                    "cs": "Je tato aplikace veřejná?"
+                },
+                "default": true
+            }
+        ]
+    }
+}

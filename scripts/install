@@ -1,0 +1,240 @@
+#!/bin/bash
+
+#=================================================
+# GENERIC START
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
+
+source _common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# MANAGE SCRIPT FAILURE
+#=================================================
+
+# Exit if an error occurs during the execution of the script
+ynh_abort_if_errors
+
+#=================================================
+# RETRIEVE ARGUMENTS FROM THE MANIFEST
+#=================================================
+
+domain=$YNH_APP_ARG_DOMAIN
+path_url="/"
+admin=$YNH_APP_ARG_ADMIN
+is_public=$YNH_APP_ARG_IS_PUBLIC
+admin_pass=$(ynh_string_random 24)
+random_key=$(ynh_string_random 32)
+registration=$YNH_APP_ARG_REGISTRATION
+database=$YNH_APP_ARG_DATABASE
+
+# This is a multi-instance app, meaning it can be installed several times independently
+# The id of the app as stated in the manifest is available as $YNH_APP_ID
+# The instance number is available as $YNH_APP_INSTANCE_NUMBER (equals "1", "2", ...)
+# The app instance name is available as $YNH_APP_INSTANCE_NAME
+#    - the first time the app is installed, YNH_APP_INSTANCE_NAME = ynhexample
+#    - the second time the app is installed, YNH_APP_INSTANCE_NAME = ynhexample__2
+#    - ynhexample__{N} for the subsequent installations, with N=3,4, ...
+# The app instance name is probably what you are interested the most, since this is
+# guaranteed to be unique. This is a good unique identifier to define installation path,
+# db names, ...
+app=$YNH_APP_INSTANCE_NAME
+
+#=================================================
+# CHECK IF THE APP CAN BE INSTALLED WITH THESE ARGS
+#=================================================
+
+final_path=/var/www/$app
+test ! -e "$final_path" || ynh_die "This path already contains a folder"
+
+# Normalize the url path syntax
+path_url=$(ynh_normalize_url_path $path_url)
+
+# Check web path availability
+ynh_webpath_available $domain $path_url
+# Register (book) web path
+ynh_webpath_register $app $domain $path_url
+
+#=================================================
+# STORE SETTINGS FROM MANIFEST
+#=================================================
+
+ynh_app_setting_set $app domain $domain
+ynh_app_setting_set $app path $path_url
+ynh_app_setting_set $app admin $admin
+ynh_app_setting_set $app is_public $is_public
+ynh_app_setting_set $app random_key $random_key
+ynh_app_setting_set $app registration $registration
+ynh_app_setting_set $app database $database
+
+
+#=================================================
+# STANDARD MODIFICATIONS
+#=================================================
+# INSTALL DEPENDENCIES
+#=================================================
+
+ynh_install_php7
+
+#=================================================
+# DOWNLOAD, CHECK AND UNPACK SOURCE
+#=================================================
+
+ynh_app_setting_set $app final_path $final_path
+# Download, check integrity, uncompress and patch the source from app.src
+ynh_setup_source "$final_path"
+
+#=================================================
+# NGINX CONFIGURATION
+#=================================================
+
+# Create a dedicated nginx config
+ynh_add_nginx_config
+if [ "$path_url" != "/" ]
+then
+	ynh_replace_string "^#sub_path_only" "" "/etc/nginx/conf.d/$domain.d/$app.conf"
+fi
+ynh_store_file_checksum "/etc/nginx/conf.d/$domain.d/$app.conf"
+
+#=================================================
+# CREATE DEDICATED USER
+#=================================================
+
+# Create a system user
+ynh_system_user_create $app
+
+#=================================================
+# PHP-FPM 7.2 CONFIGURATION
+#=================================================
+
+# Create a dedicated php-fpm7.2 config
+ynh_add_fpm7.2_config
+
+#=================================================
+# SPECIFIC SETUP
+#=================================================
+
+# GET THE ADMIN EMAIL
+email=$(ynh_user_get_info $admin 'mail')
+
+# COPY LOCAL.YAML
+sudo  cp ../conf/local.yaml $final_path/config/packages/local.yaml
+
+if [ $registration -eq 1  ]
+then
+
+# MODIFY LOCAL.YAML
+	ynh_replace_string "__REGISTRATION__" "true" "$final_path/config/packages/local.yaml"
+fi
+
+if [ $registration -eq 0 ]
+then
+# MODIFY LOCAL.YAML
+	ynh_replace_string "__REGISTRATION__" "false" "$final_path/config/packages/local.yaml"
+fi
+
+# CHECK WHICH DATABASE TO USE
+if [ "$database" = "mysql" ]; then
+	# setup application config
+	sudo  cp ../conf/.env $final_path/.env
+#=================================================
+# CREATE A MYSQL DATABASE
+#=================================================
+
+### Use these lines if you need a database for the application.
+### `ynh_mysql_setup_db` will create a database, an associated user and a ramdom password.
+### The password will be stored as 'mysqlpwd' into the app settings,
+### and will be available as $db_pwd
+### If you're not using these lines:
+###		- Remove the section "BACKUP THE MYSQL DATABASE" in the backup script
+###		- Remove also the section "REMOVE THE MYSQL DATABASE" in the remove script
+###		- As well as the section "RESTORE THE MYSQL DATABASE" in the restore script
+
+db_name=$(ynh_sanitize_dbid $app)
+ynh_app_setting_set $app db_name $db_name
+ynh_mysql_setup_db $db_name $db_name
+
+#=================================================
+# MODIFY A CONFIG FILE
+#=================================================
+	ynh_replace_string "__RANDOM_KEY__"  "$random_key" "$final_path/.env"
+	ynh_replace_string "__DOMAIN__"      "$domain"     "$final_path/.env"
+	ynh_replace_string "__DB_PASSWORD__" "$db_pwd"     "$final_path/.env"
+	ynh_replace_string "__DB_USER__"     "$db_name"    "$final_path/.env"
+	ynh_replace_string "__DB_NAME__"     "$db_name"    "$final_path/.env"
+else
+	# setup application config
+	sudo  cp ../conf/.env.sqlite $final_path/.env
+
+#=================================================
+# MODIFY A CONFIG FILE
+#=================================================
+	ynh_replace_string "__RANDOM_KEY__"  "$random_key" "$final_path/.env"
+	ynh_replace_string "__DOMAIN__"      "$domain"     "$final_path/.env"
+
+fi
+
+# COMPOSR AND SPECIFIC INSTALL FOR THE APP
+init_composer $final_path
+cd $final_path && sudo /usr/bin/php7.2 bin/console doctrine:schema:create
+cd $final_path && sudo /usr/bin/php7.2 bin/console cache:warmup --env=prod
+cd $final_path && sudo /usr/bin/php7.2 bin/console kimai:create-user "$admin" "$email" ROLE_SUPER_ADMIN "$admin_pass"
+cd $final_path && sudo /usr/bin/php7.2 bin/console doctrine:migrations:version --add --all -n
+
+
+#=================================================
+# SETUP APPLICATION 
+#=================================================
+
+# Set right permissions 
+chown -R $app: $final_path
+
+#=================================================
+# STORE THE CHECKSUM OF THE CONFIG FILE
+#=================================================
+
+# Calculate and store the config file checksum into the app settings
+ynh_store_file_checksum "$final_path/.env"
+
+#=================================================
+# SETUP SSOWAT
+#=================================================
+
+if [ $is_public -eq 0 ]
+then	# Remove the public access
+	ynh_app_setting_delete $app skipped_uris
+fi
+# Make app public if necessary
+if [ $is_public -eq 1 ]
+then
+	# unprotected_uris allows SSO credentials to be passed anyway.
+	ynh_app_setting_set $app unprotected_uris "/"
+fi
+
+#=================================================
+# RELOAD NGINX
+#=================================================
+systemctl reload php7.2-fpm
+systemctl reload nginx
+# Set default php to php5 or php7.0
+if [ "$(lsb_release --codename --short)" = "jessie" ]; then
+	update-alternatives --set php /usr/bin/php5
+else
+    update-alternatives --set php /usr/bin/php7.0
+fi
+
+#=================================================
+# SEND A README FOR THE ADMIN
+#=================================================
+
+message=" $app was successfully installed :)
+
+Please open https://$domain$path_url
+
+The admin username is: $email
+Here is the admin password: $admin_pass
+
+If you facing any issue or want to improve the app, please open a new issue on the project page: https://github.com/YunoHost-Apps/kimai2_ynh"
+
+ynh_send_readme_to_admin "$message"
